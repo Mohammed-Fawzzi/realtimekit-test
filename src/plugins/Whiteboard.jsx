@@ -1,936 +1,377 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
-  Excalidraw,
-} from '@excalidraw/excalidraw';
-
-import '@excalidraw/excalidraw/index.css';
-import excalidrawCss from '@excalidraw/excalidraw/index.css?inline';
+  EMPTY_SCENE,
+  normalizeScene,
+  pickNewerScene,
+  readLocalBackup,
+  writeLocalBackup,
+} from './whiteboardScene.js';
 
 /*
 |--------------------------------------------------------------------------
-| Whiteboard
-|--------------------------------------------------------------------------
+| Whiteboard host
 |
-| Excalidraw
-|     ↓
-| React
-|     ↓
-| RealtimeKit collaborative store
-|     ↓
-| Other participants
-|
+| - Loads Excalidraw in a same-origin iframe page (own window = correct pen)
+| - Keeps collaborative store + localStorage in the parent
 |--------------------------------------------------------------------------
 */
 
-export default function Whiteboard({ meeting }) {
-  /*
-   * ----------------------------------------------------------------------
-   * Refs
-   * ----------------------------------------------------------------------
-   */
+const FRAME_SRC = `${import.meta.env.BASE_URL}whiteboard-frame.html`;
 
-  const excalidrawAPIRef = useRef(null);
-
+export default function Whiteboard({
+  meeting,
+  active = true,
+  sessionKey = 0,
+}) {
+  const iframeRef = useRef(null);
   const storeRef = useRef(null);
-
   const initializedRef = useRef(false);
-
   const cleanupStoreRef = useRef(null);
+  const latestSceneRef = useRef(null);
+  const lastSyncedAtRef = useRef(0);
+  const writingRef = useRef(false);
+  const frameReadyRef = useRef(false);
 
-  const applyingRemoteRef = useRef(false);
+  const [bootError, setBootError] = useState(null);
 
-  const initialSceneLoadedRef = useRef(false);
-
-  const syncTimeoutRef = useRef(null);
-
-  const rootRef = useRef(null);
-
-  /*
-   * ----------------------------------------------------------------------
-   * State
-   * ----------------------------------------------------------------------
-   */
-
-  const [initialData, setInitialData] = useState(null);
-
-  const [ready, setReady] = useState(false);
-
-  /*
-   * ----------------------------------------------------------------------
-   * Inject Excalidraw CSS into the SAME DOM ROOT
-   *
-   * This is important because the Whiteboard can be rendered inside
-   * a RealtimeKit plugin/shadow DOM scope.
-   * ----------------------------------------------------------------------
-   */
-
-  useEffect(() => {
-    const element = rootRef.current;
-
-    if (!element) {
-      return;
-    }
-
-    const root = element.getRootNode();
-
-    /*
-     * If we're inside a ShadowRoot, global CSS imported by Vite
-     * will not necessarily penetrate it.
-     *
-     * So inject Excalidraw's CSS directly into that root.
-     */
-
-    if (
-      root &&
-      root instanceof ShadowRoot
-    ) {
-      const existingStyle =
-        root.querySelector(
-          'style[data-excalidraw-whiteboard]',
-        );
-
-      if (!existingStyle) {
-        const style =
-          document.createElement('style');
-
-        style.setAttribute(
-          'data-excalidraw-whiteboard',
-          'true',
-        );
-
-        style.textContent = excalidrawCss;
-
-        root.appendChild(style);
-
-        console.log(
-          '🎨 WHITEBOARD: Excalidraw CSS injected into ShadowRoot',
-        );
-      }
-    } else {
-      console.log(
-        '🎨 WHITEBOARD: Using normal document CSS',
-      );
+  const postToFrame = useCallback((message) => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    try {
+      win.postMessage(message, window.location.origin);
+    } catch {
+      // ignore
     }
   }, []);
 
-  /*
-   * ----------------------------------------------------------------------
-   * Initialize RealtimeKit collaborative store
-   * ----------------------------------------------------------------------
-   */
+  const persistScene = useCallback(
+    async (scene, { force = false } = {}) => {
+      const normalized = normalizeScene(scene);
+      if (!normalized) return false;
 
+      latestSceneRef.current = normalized;
+      writeLocalBackup(meeting, normalized);
+
+      const store = storeRef.current;
+      if (!store) return false;
+
+      if (
+        !force &&
+        normalized.updatedAt > 0 &&
+        normalized.updatedAt <= lastSyncedAtRef.current
+      ) {
+        return false;
+      }
+
+      writingRef.current = true;
+
+      try {
+        await store.set('scene', normalized);
+        lastSyncedAtRef.current = normalized.updatedAt;
+        return true;
+      } catch (error) {
+        console.error(
+          '❌ WHITEBOARD: store.set failed, retry without files:',
+          error,
+        );
+
+        try {
+          await store.set('scene', {
+            ...normalized,
+            files: {},
+          });
+          lastSyncedAtRef.current = normalized.updatedAt;
+          return true;
+        } catch (retryError) {
+          console.error('❌ WHITEBOARD: save failed:', retryError);
+          return false;
+        }
+      } finally {
+        window.setTimeout(() => {
+          writingRef.current = false;
+        }, 200);
+      }
+    },
+    [meeting],
+  );
+
+  const flushSync = useCallback(async () => {
+    if (latestSceneRef.current) {
+      await persistScene(latestSceneRef.current, { force: true });
+    }
+  }, [persistScene]);
+
+  const pushInitToFrame = useCallback(() => {
+    postToFrame({
+      type: 'wb:init',
+      scene: latestSceneRef.current || EMPTY_SCENE,
+    });
+  }, [postToFrame]);
+
+  // Store
   useEffect(() => {
     let cancelled = false;
 
-    const initializeStore = async () => {
-      /*
-       * Meeting can come from App directly.
-       */
-
-      if (!meeting) {
-        console.warn(
-          '⚠️ WHITEBOARD: Meeting is not available yet',
-        );
-
-        return;
-      }
-
-      if (initializedRef.current) {
-        return;
-      }
-
+    const init = async () => {
+      if (!meeting || initializedRef.current) return;
       initializedRef.current = true;
 
-      console.log(
-        '🚀 WHITEBOARD: Initializing collaborative store...',
-      );
-
       try {
-        /*
-         * Create / get the RealtimeKit store.
-         */
-
-        const store =
-          await Promise.resolve(
-            meeting.stores.create(
-              'whiteboard',
-            ),
-          );
-
-        if (cancelled) {
-          return;
-        }
-
-        if (!store) {
-          throw new Error(
-            'RealtimeKit whiteboard store is undefined',
-          );
-        }
+        const store = await meeting.stores.create('whiteboard');
+        if (cancelled) return;
+        if (!store) throw new Error('Store undefined');
 
         storeRef.current = store;
 
-        console.log(
-          '✅ WHITEBOARD: Store ready:',
-          store,
-        );
+        const fromStore = normalizeScene(store.get('scene'));
+        const fromLocal = readLocalBackup(meeting);
+        const restored = pickNewerScene(fromStore, fromLocal);
 
-        console.log(
-          '🔎 WHITEBOARD STORE API:',
-          {
-            set: typeof store.set,
-            get: typeof store.get,
-            subscribe:
-              typeof store.subscribe,
-            unsubscribe:
-              typeof store.unsubscribe,
-          },
-        );
+        if (restored) {
+          latestSceneRef.current = restored;
+          lastSyncedAtRef.current = restored.updatedAt || 0;
 
-        /*
-         * ------------------------------------------------------------------
-         * Restore existing scene
-         * ------------------------------------------------------------------
-         */
-
-        if (
-          typeof store.get ===
-          'function'
-        ) {
-          try {
-            const existingScene =
-              await Promise.resolve(
-                store.get('scene'),
-              );
-
-            console.log(
-              '📥 WHITEBOARD: Existing scene:',
-              existingScene,
-            );
-
-            if (
-              existingScene &&
-              typeof existingScene ===
-                'object'
-            ) {
-              /*
-               * Only use valid Excalidraw scene fields.
-               */
-
-              setInitialData({
-                elements:
-                  existingScene.elements ||
-                  [],
-
-                appState:
-                  existingScene.appState ||
-                  {
-                    viewBackgroundColor:
-                      '#ffffff',
-                  },
-
-                files:
-                  existingScene.files ||
-                  {},
-              });
-            }
-          } catch (error) {
-            console.warn(
-              '⚠️ WHITEBOARD: Failed to restore scene:',
-              error,
-            );
+          if (
+            fromLocal &&
+            (!fromStore ||
+              (fromLocal.updatedAt || 0) >
+                (fromStore.updatedAt || 0))
+          ) {
+            await persistScene(fromLocal, { force: true });
           }
         }
 
-        /*
-         * ------------------------------------------------------------------
-         * Subscribe to remote changes
-         * ------------------------------------------------------------------
-         */
+        if (frameReadyRef.current) {
+          pushInitToFrame();
+        }
 
-        const handleRemoteScene = (
-          payload,
-        ) => {
-          if (!payload) {
-            return;
-          }
+        const onRemote = (payload) => {
+          if (writingRef.current) return;
 
-          const remoteScene =
+          const remote = normalizeScene(
             payload?.value !== undefined
               ? payload.value
-              : payload;
+              : payload,
+          );
+
+          if (!remote) return;
 
           if (
-            !remoteScene ||
-            typeof remoteScene !==
-              'object'
+            remote.updatedAt > 0 &&
+            remote.updatedAt <= lastSyncedAtRef.current
           ) {
             return;
           }
 
-          console.log(
-            '📥 WHITEBOARD: Remote scene received',
-            {
-              elements:
-                remoteScene.elements
-                  ?.length || 0,
-            },
-          );
+          const current = latestSceneRef.current;
 
-          const api =
-            excalidrawAPIRef.current;
-
-          /*
-           * Excalidraw may not have mounted yet.
-           *
-           * Save it as initialData.
-           */
-
-          if (!api) {
-            setInitialData({
-              elements:
-                remoteScene.elements ||
-                [],
-
-              appState:
-                remoteScene.appState ||
-                {
-                  viewBackgroundColor:
-                    '#ffffff',
-                },
-
-              files:
-                remoteScene.files ||
-                {},
-            });
-
+          if (
+            current &&
+            current.updatedAt > 0 &&
+            remote.updatedAt > 0 &&
+            remote.updatedAt < current.updatedAt
+          ) {
             return;
           }
 
-          /*
-           * Prevent onChange from sending this remote
-           * update back to RealtimeKit.
-           */
+          latestSceneRef.current = remote;
+          lastSyncedAtRef.current = Math.max(
+            lastSyncedAtRef.current,
+            remote.updatedAt || 0,
+          );
 
-          applyingRemoteRef.current =
-            true;
-
-          try {
-            api.updateScene({
-              elements:
-                remoteScene.elements ||
-                [],
-
-              appState: {
-                ...(remoteScene.appState ||
-                  {}),
-              },
-
-              files:
-                remoteScene.files ||
-                {},
-            });
-
-            /*
-             * Also update files if Excalidraw
-             * supports them.
-             */
-
-            if (
-              remoteScene.files &&
-              typeof api.addFiles ===
-                'function'
-            ) {
-              const files =
-                Object.values(
-                  remoteScene.files,
-                );
-
-              if (files.length > 0) {
-                try {
-                  api.addFiles(files);
-                } catch (error) {
-                  console.warn(
-                    '⚠️ WHITEBOARD: Failed to add remote files:',
-                    error,
-                  );
-                }
-              }
-            }
-          } catch (error) {
-            console.error(
-              '❌ WHITEBOARD: Failed to apply remote scene:',
-              error,
-            );
-          }
-
-          /*
-           * Excalidraw can fire onChange after updateScene.
-           *
-           * Keep the guard alive for the next animation frame.
-           */
-
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              applyingRemoteRef.current =
-                false;
-            });
+          postToFrame({
+            type: 'wb:remote-scene',
+            scene: remote,
           });
         };
 
-        /*
-         * RealtimeKit Store API.
-         */
-
-        const unsubscribe =
-          store.subscribe(
-            'scene',
-            handleRemoteScene,
-          );
-
-        console.log(
-          '✅ WHITEBOARD: Store subscription ready',
-          unsubscribe,
-        );
-
-        /*
-         * Save cleanup.
-         */
-
-        cleanupStoreRef.current =
-          () => {
-            try {
-              if (
-                typeof unsubscribe ===
-                'function'
-              ) {
-                unsubscribe();
-              } else if (
-                typeof store.unsubscribe ===
-                'function'
-              ) {
-                store.unsubscribe(
-                  'scene',
-                  handleRemoteScene,
-                );
-              }
-            } catch (error) {
-              console.warn(
-                '⚠️ WHITEBOARD: Store unsubscribe failed:',
-                error,
-              );
-            }
-          };
-
-        setReady(true);
+        store.subscribe('scene', onRemote);
+        cleanupStoreRef.current = () => {
+          try {
+            store.unsubscribe('scene', onRemote);
+          } catch {
+            // ignore
+          }
+        };
       } catch (error) {
-        console.error(
-          '❌ WHITEBOARD: Store initialization failed:',
-          error,
-        );
+        console.error('❌ WHITEBOARD: store init failed:', error);
+        initializedRef.current = false;
 
-        initializedRef.current =
-          false;
+        const fromLocal = readLocalBackup(meeting);
+        if (fromLocal) {
+          latestSceneRef.current = fromLocal;
+        }
       }
     };
 
-    initializeStore();
+    init();
 
     return () => {
       cancelled = true;
-
-      if (
-        syncTimeoutRef.current
-      ) {
-        clearTimeout(
-          syncTimeoutRef.current,
-        );
-      }
-
-      if (
-        cleanupStoreRef.current
-      ) {
-        cleanupStoreRef.current();
-        cleanupStoreRef.current =
-          null;
-      }
-
+      cleanupStoreRef.current?.();
+      cleanupStoreRef.current = null;
       storeRef.current = null;
-
-      initializedRef.current =
-        false;
-
-      console.log(
-        '🧹 WHITEBOARD: Store cleanup',
-      );
+      initializedRef.current = false;
     };
-  }, [meeting]);
+  }, [meeting, persistScene, postToFrame, pushInitToFrame]);
 
-  /*
-   * ----------------------------------------------------------------------
-   * Excalidraw API
-   * ----------------------------------------------------------------------
-   */
+  // Persist on hide / unmount
+  useEffect(() => {
+    const onHide = () => {
+      void flushSync();
+    };
 
-  const handleExcalidrawAPI =
-    useCallback((api) => {
-      excalidrawAPIRef.current =
-        api;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onHide();
+    };
 
-      console.log(
-        '🎨 WHITEBOARD: Excalidraw API ready',
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('beforeunload', onHide);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('beforeunload', onHide);
+      document.removeEventListener(
+        'visibilitychange',
+        onVisibility,
       );
+      void flushSync();
+    };
+  }, [flushSync]);
 
-      /*
-       * If the store already had a scene,
-       * apply it once Excalidraw is ready.
-       */
+  // Frame ↔ parent messages
+  useEffect(() => {
+    if (!active) return undefined;
 
-      const store =
-        storeRef.current;
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
 
-      if (
-        api &&
-        store &&
-        !initialSceneLoadedRef.current
-      ) {
-        initialSceneLoadedRef.current =
-          true;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
 
-        Promise.resolve(
-          store.get?.('scene'),
-        )
-          .then((scene) => {
-            if (
-              !scene ||
-              !api
-            ) {
-              return;
-            }
-
-            console.log(
-              '📥 WHITEBOARD: Applying stored scene to Excalidraw',
-            );
-
-            applyingRemoteRef.current =
-              true;
-
-            api.updateScene({
-              elements:
-                scene.elements ||
-                [],
-
-              appState: {
-                ...(scene.appState ||
-                  {}),
-              },
-
-              files:
-                scene.files ||
-                {},
-            });
-
-            requestAnimationFrame(
-              () => {
-                requestAnimationFrame(
-                  () => {
-                    applyingRemoteRef.current =
-                      false;
-                  },
-                );
-              },
-            );
-          })
-          .catch((error) => {
-            console.warn(
-              '⚠️ WHITEBOARD: Failed to load stored scene:',
-              error,
-            );
-          });
+      if (data.type === 'wb:hello' || data.type === 'wb:ready') {
+        frameReadyRef.current = true;
+        setBootError(null);
+        pushInitToFrame();
+        return;
       }
-    }, []);
 
-  /*
-   * ----------------------------------------------------------------------
-   * Sync scene to RealtimeKit
-   * ----------------------------------------------------------------------
-   */
+      if (data.type === 'wb:scene') {
+        const scene = normalizeScene(data.scene);
+        if (!scene) return;
+        latestSceneRef.current = scene;
+        writeLocalBackup(meeting, scene);
+        void persistScene(scene);
+      }
+    };
 
-  const syncScene =
-    useCallback(
-      async (
-        elements,
-        appState,
-        files,
-      ) => {
-        const store =
-          storeRef.current;
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [active, meeting, persistScene, pushInitToFrame]);
 
-        if (!store) {
-          return;
-        }
+  // Refresh Excalidraw when host size / fullscreen changes
+  useEffect(() => {
+    if (!active) return undefined;
 
-        if (
-          applyingRemoteRef.current
-        ) {
-          return;
-        }
+    const refresh = () => {
+      postToFrame({ type: 'wb:refresh' });
+    };
 
-        /*
-         * Cancel previous sync.
-         *
-         * Drawing generates many onChange events.
-         *
-         * We don't want:
-         *
-         * 100 pointer events
-         *       ↓
-         * 100 network writes
-         *
-         * Instead:
-         *
-         * pointer events
-         *       ↓
-         * debounce
-         *       ↓
-         * one network write
-         */
+    document.addEventListener('fullscreenchange', refresh);
+    document.addEventListener('webkitfullscreenchange', refresh);
+    window.addEventListener('resize', refresh);
 
-        if (
-          syncTimeoutRef.current
-        ) {
-          clearTimeout(
-            syncTimeoutRef.current,
-          );
-        }
+    const iframe = iframeRef.current;
+    const ro = iframe
+      ? new ResizeObserver(() => refresh())
+      : null;
+    if (iframe && ro) ro.observe(iframe);
 
-        syncTimeoutRef.current =
-          setTimeout(async () => {
-            try {
-              /*
-               * Only store useful app state.
-               *
-               * Don't sync temporary UI state.
-               */
+    return () => {
+      document.removeEventListener('fullscreenchange', refresh);
+      document.removeEventListener(
+        'webkitfullscreenchange',
+        refresh,
+      );
+      window.removeEventListener('resize', refresh);
+      ro?.disconnect();
+    };
+  }, [active, sessionKey, postToFrame]);
 
-              const sharedAppState =
-                {
-                  viewBackgroundColor:
-                    appState
-                      ?.viewBackgroundColor ||
-                    '#ffffff',
+  useEffect(() => {
+    if (!active) {
+      void flushSync();
+      frameReadyRef.current = false;
+      return undefined;
+    }
 
-                  currentItemStrokeColor:
-                    appState
-                      ?.currentItemStrokeColor ||
-                    '#1e1e1e',
+    frameReadyRef.current = false;
+    setBootError(null);
 
-                  currentItemBackgroundColor:
-                    appState
-                      ?.currentItemBackgroundColor ||
-                    'transparent',
+    const timeout = window.setTimeout(() => {
+      if (!frameReadyRef.current) {
+        setBootError('whiteboard frame not ready');
+      }
+    }, 8000);
 
-                  currentItemFillStyle:
-                    appState
-                      ?.currentItemFillStyle ||
-                    'hachure',
+    return () => {
+      window.clearTimeout(timeout);
+      void flushSync();
+      frameReadyRef.current = false;
+    };
+  }, [active, sessionKey, flushSync]);
 
-                  currentItemStrokeWidth:
-                    appState
-                      ?.currentItemStrokeWidth ||
-                    2,
-
-                  currentItemRoughness:
-                    appState
-                      ?.currentItemRoughness ||
-                    1,
-
-                  currentItemOpacity:
-                    appState
-                      ?.currentItemOpacity ??
-                    100,
-
-                  currentItemFontFamily:
-                    appState
-                      ?.currentItemFontFamily,
-
-                  currentItemFontSize:
-                    appState
-                      ?.currentItemFontSize,
-
-                  currentItemTextAlign:
-                    appState
-                      ?.currentItemTextAlign,
-
-                  currentItemArrowhead:
-                    appState
-                      ?.currentItemArrowhead,
-                };
-
-              await store.set(
-                'scene',
-                {
-                  elements:
-                    Array.from(
-                      elements || [],
-                    ),
-
-                  appState:
-                    sharedAppState,
-
-                  files:
-                    files || {},
-                },
-              );
-
-              console.log(
-                '📤 WHITEBOARD: Scene synced',
-                {
-                  elements:
-                    elements?.length ||
-                    0,
-                },
-              );
-            } catch (error) {
-              console.error(
-                '❌ WHITEBOARD: Failed to sync scene:',
-                error,
-              );
-            }
-          }, 150);
-      },
-      [],
-    );
-
-  /*
-   * ----------------------------------------------------------------------
-   * Excalidraw onChange
-   * ----------------------------------------------------------------------
-   */
-
-  const handleChange =
-    useCallback(
-      (
-        elements,
-        appState,
-        files,
-      ) => {
-        /*
-         * Ignore changes produced by a remote participant.
-         */
-
-        if (
-          applyingRemoteRef.current
-        ) {
-          return;
-        }
-
-        /*
-         * Ignore the first empty scene event.
-         *
-         * Excalidraw normally fires onChange during initialization.
-         * Without this guard, a new client could overwrite the
-         * shared scene with [] before the existing scene is restored.
-         */
-
-        if (
-          !initialSceneLoadedRef.current
-        ) {
-          return;
-        }
-
-        syncScene(
-          elements,
-          appState,
-          files,
-        );
-      },
-      [syncScene],
-    );
-
-  /*
-   * ----------------------------------------------------------------------
-   * Render
-   * ----------------------------------------------------------------------
-   */
+  if (!active) {
+    return null;
+  }
 
   return (
     <div
-      ref={rootRef}
-      className="whiteboard-root"
+      className="realtimekit-whiteboard-anchor"
       style={{
-        position: 'relative',
-
+        position: 'absolute',
+        inset: 0,
         width: '100%',
-
         height: '100%',
-
-        minWidth: 0,
-
-        minHeight: 0,
-
-        display: 'flex',
-
-        flexDirection: 'column',
-
         overflow: 'hidden',
-
-        background:
-          '#ffffff',
-
-        isolation: 'isolate',
+        background: '#ffffff',
       }}
     >
-      {/*
-       * ---------------------------------------------------------------
-       * Excalidraw
-       * ---------------------------------------------------------------
-       */}
-
-      <div
+      <iframe
+        key={sessionKey}
+        ref={iframeRef}
+        title="Whiteboard"
+        src={FRAME_SRC}
+        allow="clipboard-read; clipboard-write"
         style={{
-          position: 'relative',
-
-          flex: '1 1 auto',
-
+          border: 0,
           width: '100%',
-
           height: '100%',
-
-          minWidth: 0,
-
-          minHeight: 0,
-
-          overflow: 'hidden',
-
-          background:
-            '#ffffff',
+          display: 'block',
+          background: '#ffffff',
         }}
-      >
-        <Excalidraw
-          /*
-           * IMPORTANT:
-           * This is the API used by Excalidraw 0.18.x.
-           */
+      />
 
-          onExcalidrawAPI={
-            handleExcalidrawAPI
-          }
-
-          /*
-           * Collaborative scene changes.
-           */
-
-          onChange={handleChange}
-
-          /*
-           * We want a fully interactive whiteboard.
-           */
-
-          viewModeEnabled={false}
-
-          /*
-           * Enable keyboard shortcuts.
-           */
-
-          handleKeyboardGlobally={true}
-
-          /*
-           * Light theme.
-           */
-
-          theme="light"
-
-          /*
-           * Initial data.
-           *
-           * If a scene exists, load it.
-           */
-
-          initialData={
-            initialData || {
-              elements: [],
-
-              appState: {
-                viewBackgroundColor:
-                  '#ffffff',
-              },
-
-              files: {},
-            }
-          }
-
-          /*
-           * Full Excalidraw UI.
-           */
-
-          UIOptions={{
-            canvasActions: {
-              changeViewBackgroundColor:
-                true,
-
-              clearCanvas:
-                true,
-
-              export: {
-                saveFileToDisk:
-                  true,
-              },
-
-              loadScene:
-                true,
-
-              toggleTheme:
-                true,
-            },
-          }}
-        />
-      </div>
-
-      {/*
-       * ---------------------------------------------------------------
-       * Small loading indicator
-       * ---------------------------------------------------------------
-       *
-       * Only appears until the collaborative store is ready.
-       *
-       * It doesn't block the whiteboard.
-       * ---------------------------------------------------------------
-       */}
-
-      {!ready && (
+      {bootError && (
         <div
           style={{
             position: 'absolute',
-
             top: 12,
-
             right: 12,
-
-            zIndex: 9999,
-
-            padding:
-              '6px 10px',
-
+            zIndex: 5,
+            padding: '6px 10px',
             borderRadius: 6,
-
-            background:
-              'rgba(0, 0, 0, 0.65)',
-
-            color: '#ffffff',
-
+            background: 'rgba(180, 40, 40, 0.85)',
+            color: '#fff',
             fontSize: 12,
-
-            pointerEvents:
-              'none',
+            pointerEvents: 'none',
           }}
         >
-          Connecting...
+          {bootError}
         </div>
       )}
     </div>

@@ -52,21 +52,25 @@ import Whiteboard from './plugins/Whiteboard';
 
 const AUTH_TOKEN = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcmdJZCI6IjQxZGRkMzA2LTc3MTYtNDVkNy1hZTNmLTNlMmJmYzNjYzUwMCIsIm1lZXRpbmdJZCI6ImJiYjllYTlmLTNlYmYtNDFmYi05ZTQ2LTNhZDJkZTE1MTFjNSIsInBhcnRpY2lwYW50SWQiOiJhYWFmZjNhOC0xOGZhLTQyMWQtYjE2MC00NWJkNzQ2MDE1NTQiLCJwcmVzZXRJZCI6ImJmYWZlZGFmLTMwMzMtNDk5Ny04NTExLTQ2ZWM4OTVlOWQ0ZCIsImlhdCI6MTc4ODU0MjcxMiwiZXhwIjoxNzk3MTgyNzEyfQ.J97R9CjafqfcpLDs5CKvcRKwHmHWRrVDby8baS5FVDFnguobfV9b9ZxPcX6Jo_58K2MWBQ1H_o0yr7HDI2cmeTfl9Cb9jTCWBZ1HBv2CVdHYHztuS_6GHp88OFkAKrmF9SF0nkVwIlXJig1BZRAOVaCPiLvRm6kKbrY4DlqvyA_hUDHJIU-Kflcxk2lLtI18_7wq2BXcFY0N4NxuU571U-Fv22lAqF-Rdg4MyBD_9xMRDd9q1szK2NxNKygLvXhB43HXCS47wutFBD9yJiNvLadsEbQI4E6KVxY2icFVr21hUKuNEw67K1mB6txNaojmdSBBCwomGBoYzi79EVdOtQ'
 // ============================================================
-// WHITEBOARD PLUGIN ELEMENT
+// WHITEBOARD PLUGIN HOST
 // ============================================================
 //
-// IMPORTANT:
-//
-// RealtimeKit requires the plugin component to be an HTMLElement
-// when defaults.plugins is registered.
-//
-// So we create the element BEFORE initMeeting().
-//
-// Then after meeting exists, we mount React inside it.
+// RealtimeKit requires the plugin component to be an HTMLElement.
+// We mount React/Excalidraw INSIDE this element (no body portal),
+// so fullscreen on <rtk-meeting> includes the whiteboard and does
+// not cover/hide meeting controls (Full Screen, etc.).
 //
 
 const whiteboardElement =
   document.createElement('div');
+
+whiteboardElement.className =
+  'realtimekit-whiteboard-anchor';
+
+whiteboardElement.setAttribute(
+  'data-rtk-whiteboard',
+  'true',
+);
 
 whiteboardElement.style.width =
   '100%';
@@ -298,35 +302,135 @@ export default function App() {
       '======================================');
 
     // ==========================================================
-    // MOUNT WHITEBOARD REACT TREE
+    // MOUNT WHITEBOARD INSIDE PLUGIN HOST (no portal overlay)
     // ==========================================================
 
-    if (
-      !whiteboardRootRef.current
-    ) {
-      console.log(
-        '🎨 Creating Whiteboard React root...',
-      );
+    let whiteboardSession = 0;
 
-      whiteboardRootRef.current =
-        createRoot(
-          whiteboardElement,
+    const renderWhiteboard = (active) => {
+      if (!whiteboardRootRef.current) {
+        console.log(
+          '🎨 Creating Whiteboard React root...',
         );
+
+        whiteboardRootRef.current =
+          createRoot(whiteboardElement);
+      }
+
+      whiteboardRootRef.current.render(
+        <Whiteboard
+          meeting={meeting}
+          active={active}
+          sessionKey={
+            whiteboardSession
+          }
+        />,
+      );
+    };
+
+    renderWhiteboard(false);
+
+    console.log(
+      '✅ Whiteboard ready (waiting for plugin activate)',
+    );
+
+    // ==========================================================
+    // Plugin activate / deactivate
+    // ==========================================================
+
+    try {
+      const plugins =
+        meeting.plugins?.all;
+
+      const whiteboardPlugin =
+        plugins &&
+        typeof plugins.toArray ===
+          'function'
+          ? plugins
+              .toArray()
+              .find(
+                (plugin) =>
+                  plugin?.component ===
+                    whiteboardElement ||
+                  String(
+                    plugin?.id || '',
+                  ).includes(
+                    'whiteboard',
+                  ),
+              )
+          : null;
+
+      if (whiteboardPlugin?.on) {
+        let enableTimer = null;
+
+        const onEnabled = () => {
+          if (enableTimer) {
+            clearTimeout(enableTimer);
+          }
+
+          enableTimer = setTimeout(() => {
+            whiteboardSession += 1;
+
+            console.log(
+              '🔁 Whiteboard enabled — session',
+              whiteboardSession,
+            );
+
+            renderWhiteboard(true);
+
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.dispatchEvent(
+                  new Event(
+                    'rtk-whiteboard-activated',
+                  ),
+                );
+                window.dispatchEvent(
+                  new Event('resize'),
+                );
+              });
+            });
+          }, 50);
+        };
+
+        const onClosed = () => {
+          if (enableTimer) {
+            clearTimeout(enableTimer);
+            enableTimer = null;
+          }
+
+          console.log(
+            '⏹️ Whiteboard closed',
+          );
+
+          renderWhiteboard(false);
+        };
+
+        whiteboardPlugin.on(
+          'enabled',
+          onEnabled,
+        );
+
+        whiteboardPlugin.on(
+          'ready',
+          onEnabled,
+        );
+
+        whiteboardPlugin.on(
+          'closed',
+          onClosed,
+        );
+
+        if (whiteboardPlugin.active) {
+          onEnabled();
+        }
+      }
+    } catch (error) {
+      console.warn(
+        '⚠️ Could not attach whiteboard plugin listeners:',
+        error,
+      );
     }
-
-    console.log(
-      '🧑‍🏫 Rendering Whiteboard with meeting...',
-    );
-
-    whiteboardRootRef.current.render(
-      <Whiteboard
-        meeting={meeting}
-      />,
-    );
-
-    console.log(
-      '✅ Whiteboard React tree rendered',
-    );
 
     // ==========================================================
     // INITIALIZE ADDONS

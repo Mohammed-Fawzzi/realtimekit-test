@@ -1,132 +1,18 @@
-.realtimekit-whiteboard {
-  position: absolute !important;
-  inset: 0 !important;
-
+.realtimekit-whiteboard-anchor {
+  position: relative !important;
   width: 100% !important;
   height: 100% !important;
-
   min-width: 0 !important;
   min-height: 0 !important;
-
   overflow: hidden !important;
-
-  isolation: isolate !important;
-
   background: #ffffff !important;
+  box-sizing: border-box !important;
 }
 
-.realtimekit-whiteboard-excalidraw {
-  position: absolute !important;
-  inset: 0 !important;
-
+.realtimekit-whiteboard-anchor iframe {
+  border: 0 !important;
   width: 100% !important;
   height: 100% !important;
-
-  min-width: 0 !important;
-  min-height: 0 !important;
-}
-
-/*
- * Force Excalidraw to occupy the whole plugin.
- */
-
-.realtimekit-whiteboard .excalidraw {
-  position: absolute !important;
-
-  inset: 0 !important;
-
-  width: 100% !important;
-  height: 100% !important;
-
-  min-width: 0 !important;
-  min-height: 0 !important;
-
-  font-family:
-    "Excalifont",
-    "Virgil",
-    "Comic Sans MS",
-    sans-serif !important;
-
-  color: #1b1b1f !important;
-
+  display: block !important;
   background: #ffffff !important;
-}
-
-/*
- * Excalidraw app root.
- */
-
-.realtimekit-whiteboard
-  .excalidraw
-  .App {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-/*
- * Make sure Excalidraw UI isn't affected
- * by RealtimeKit global button/input rules.
- */
-
-.realtimekit-whiteboard
-  .excalidraw
-  button {
-  font-family: inherit !important;
-  box-sizing: border-box !important;
-}
-
-.realtimekit-whiteboard
-  .excalidraw
-  input,
-.realtimekit-whiteboard
-  .excalidraw
-  textarea,
-.realtimekit-whiteboard
-  .excalidraw
-  select {
-  box-sizing: border-box !important;
-}
-
-/*
- * Excalidraw islands.
- */
-
-.realtimekit-whiteboard
-  .excalidraw
-  .Island {
-  box-sizing: border-box !important;
-}
-
-/*
- * Prevent the host meeting UI from
- * clipping the Excalidraw toolbar.
- */
-
-.realtimekit-whiteboard
-  .excalidraw
-  .App-menu_top,
-.realtimekit-whiteboard
-  .excalidraw
-  .App-toolbar {
-  z-index: 10 !important;
-}
-
-/*
- * Make dialogs/popups appear above
- * the whiteboard.
- */
-
-.realtimekit-whiteboard
-  .excalidraw
-  .popover,
-.realtimekit-whiteboard
-  .excalidraw
-  .dropdown-menu-container,
-.realtimekit-whiteboard
-  .excalidraw
-  .FixedSideContainer,
-.realtimekit-whiteboard
-  .excalidraw
-  .Modal {
-  z-index: 100 !important;
 }
