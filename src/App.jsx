@@ -43,6 +43,7 @@ import RealtimeKitVideoBackground from '@cloudflare/realtimekit-ui-addons/video-
 // ============================================================
 
 import Whiteboard from './plugins/Whiteboard';
+import ClassCountdown from './components/ClassCountdown';
 
 // ============================================================
 // AUTH TOKEN
@@ -128,6 +129,7 @@ function MeetingUI({
         showSetupScreen={true}
         applyDesignSystem={true}
       />
+      <ClassCountdown meeting={meeting} />
     </div>
   );
 }
@@ -650,6 +652,7 @@ export default function App() {
             );
 
           // On phones, Fullscreen often traps users with no exit control.
+          // Replace call-duration clock with synced class countdown (overlay).
           const stripFullscreen = (items) => {
             if (!Array.isArray(items)) return items;
             return items.filter((item) => {
@@ -658,10 +661,21 @@ export default function App() {
             });
           };
 
+          const withoutClock = (items) => {
+            if (!Array.isArray(items)) return items;
+            return items.filter((item) => {
+              const name = Array.isArray(item) ? item[0] : item;
+              return name !== 'rtk-clock';
+            });
+          };
+
           setConfig({
             ...newConfig,
             root: {
               ...newConfig.root,
+              'div#header-right': withoutClock(
+                newConfig.root?.['div#header-right'],
+              ),
               'rtk-more-toggle.activeMoreMenu.sm': stripFullscreen(
                 newConfig.root?.[
                   'rtk-more-toggle.activeMoreMenu.sm'
