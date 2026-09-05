@@ -38,8 +38,6 @@ import ReactionsManagerAddon from '@cloudflare/realtimekit-ui-addons/reactions-m
 
 import RealtimeKitVideoBackground from '@cloudflare/realtimekit-ui-addons/video-background';
 
-import CustomControlbarButton from '@cloudflare/realtimekit-ui-addons/custom-controlbar-button';
-
 // ============================================================
 // WHITEBOARD
 // ============================================================
@@ -668,35 +666,6 @@ export default function App() {
           );
 
           // ======================================================
-          // CUSTOM CONTROL BAR
-          // ======================================================
-
-          const customControlBarButton =
-            new CustomControlbarButton(
-              {
-                position:
-                  'left',
-
-                icon:
-                  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 17.75a1.25 1.25 0 1 1 0 2.5a1.25 1.25 0 0 1 0-2.5zM12 14c0-2.5 4-2.5 4-6a4 4 0 1 0-8 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-
-                label:
-                  'Test',
-
-                onClick:
-                  () => {
-                    console.log(
-                      '🧪 Custom Test button clicked',
-                    );
-                  },
-              },
-            );
-
-          console.log(
-            '🔘 Custom Control Bar initialized',
-          );
-
-          // ======================================================
           // REGISTER ADDONS
           // ======================================================
 
@@ -714,8 +683,6 @@ export default function App() {
                 reactionsAddon,
 
                 videoBackground,
-
-                customControlBarButton,
               ],
 
               meeting,
