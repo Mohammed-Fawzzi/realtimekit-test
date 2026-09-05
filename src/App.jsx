@@ -141,13 +141,33 @@ function MeetingUI({
   }
 
   return (
-    <div className="rtk-meeting-shell">
+    <div
+      style={{
+        width: '100vw',
+
+        height: '100vh',
+
+        position: 'fixed',
+
+        inset: 0,
+
+        overflow: 'hidden',
+      }}
+    >
       <RtkMeeting
         meeting={meeting}
+
         config={config}
+
         mode="fill"
-        showSetupScreen={true}
-        applyDesignSystem={true}
+
+        showSetupScreen={
+          true
+        }
+
+        applyDesignSystem={
+          true
+        }
       />
     </div>
   );
@@ -701,42 +721,30 @@ export default function App() {
               meeting,
             );
 
-          // Keep Leave / More easy to reach on mobile (end of bar).
-          const mobileBar = [
-            'rtk-mic-toggle',
-            'rtk-camera-toggle',
-            'rtk-webinar-stage-toggle',
-            'rtk-stage-toggle',
-            'rtk-more-toggle',
-            'rtk-leave-button',
-          ];
+          console.log(
+            '======================================',
+          );
 
-          setConfig({
-            ...newConfig,
-            root: {
-              ...newConfig.root,
-              'div#controlbar-mobile': mobileBar,
-            },
-            styles: {
-              ...newConfig.styles,
-              'rtk-controlbar.sm': {
-                ...(newConfig.styles?.['rtk-controlbar.sm'] || {}),
-                display: 'flex',
-                position: 'relative',
-                zIndex: '50',
-                backgroundColor:
-                  'rgb(var(--rtk-colors-background-1000, 0 0 0))',
-              },
-              'rtk-controlbar.md': {
-                ...(newConfig.styles?.['rtk-controlbar.md'] || {}),
-                display: 'flex',
-                position: 'relative',
-                zIndex: '50',
-                backgroundColor:
-                  'rgb(var(--rtk-colors-background-1000, 0 0 0))',
-              },
-            },
-          });
+          console.log(
+            '✅ ALL ADDONS REGISTERED',
+          );
+
+          console.log(
+            'NEW UI CONFIG:',
+            newConfig,
+          );
+
+          console.log(
+            '======================================',
+          );
+
+          // ======================================================
+          // UPDATE UI
+          // ======================================================
+
+          setConfig(
+            newConfig,
+          );
         } catch (error) {
           console.error(
             '❌ ADDONS INITIALIZATION ERROR:',
