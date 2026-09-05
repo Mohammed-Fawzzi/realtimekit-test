@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   EMPTY_SCENE,
+  extractStoreScene,
   normalizeScene,
   pickNewerScene,
   readLocalBackup,
+  sceneElementCount,
   writeLocalBackup,
 } from './whiteboardScene.js';
 
@@ -31,6 +33,8 @@ export default function Whiteboard({
   const latestSceneRef = useRef(null);
   const lastSyncedAtRef = useRef(0);
   const writingRef = useRef(false);
+  const pendingRemoteRef = useRef(null);
+  const applyRemoteRef = useRef(null);
   const frameReadyRef = useRef(false);
 
   const [bootError, setBootError] = useState(null);
@@ -90,6 +94,11 @@ export default function Whiteboard({
       } finally {
         window.setTimeout(() => {
           writingRef.current = false;
+          const pending = pendingRemoteRef.current;
+          if (pending) {
+            pendingRemoteRef.current = null;
+            applyRemoteRef.current?.(pending);
+          }
         }, 200);
       }
     },
@@ -132,12 +141,14 @@ export default function Whiteboard({
           latestSceneRef.current = restored;
           lastSyncedAtRef.current = restored.updatedAt || 0;
 
-          if (
-            fromLocal &&
-            (!fromStore ||
-              (fromLocal.updatedAt || 0) >
-                (fromStore.updatedAt || 0))
-          ) {
+          // Only seed the shared store from localStorage when the store
+          // is empty — never overwrite a live session with a stale backup.
+          const storeEmpty =
+            !fromStore ||
+            (sceneElementCount(fromStore) === 0 &&
+              !(fromStore.updatedAt > 0));
+
+          if (fromLocal && storeEmpty) {
             await persistScene(fromLocal, { force: true });
           }
         }
@@ -146,16 +157,18 @@ export default function Whiteboard({
           pushInitToFrame();
         }
 
-        const onRemote = (payload) => {
-          if (writingRef.current) return;
-
-          const remote = normalizeScene(
-            payload?.value !== undefined
-              ? payload.value
-              : payload,
-          );
-
+        const applyRemote = (payload) => {
+          const remote = extractStoreScene(payload);
           if (!remote) return;
+
+          // Ignore unwrap failures / empty echoes that would wipe the canvas.
+          if (
+            sceneElementCount(remote) === 0 &&
+            !(remote.updatedAt > 0) &&
+            sceneElementCount(latestSceneRef.current) > 0
+          ) {
+            return;
+          }
 
           if (
             remote.updatedAt > 0 &&
@@ -180,11 +193,24 @@ export default function Whiteboard({
             lastSyncedAtRef.current,
             remote.updatedAt || 0,
           );
+          writeLocalBackup(meeting, remote);
 
           postToFrame({
             type: 'wb:remote-scene',
             scene: remote,
           });
+        };
+
+        applyRemoteRef.current = applyRemote;
+
+        const onRemote = (payload) => {
+          // Skip our own store.set echo; queue true remote updates.
+          if (writingRef.current) {
+            pendingRemoteRef.current = payload;
+            return;
+          }
+
+          applyRemote(payload);
         };
 
         store.subscribe('scene', onRemote);
@@ -213,6 +239,8 @@ export default function Whiteboard({
       cleanupStoreRef.current?.();
       cleanupStoreRef.current = null;
       storeRef.current = null;
+      applyRemoteRef.current = null;
+      pendingRemoteRef.current = null;
       initializedRef.current = false;
     };
   }, [meeting, persistScene, postToFrame, pushInitToFrame]);

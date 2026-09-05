@@ -50,7 +50,16 @@ import Whiteboard from './plugins/Whiteboard';
 // AUTH TOKEN
 // ============================================================
 
-const AUTH_TOKEN = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcmdJZCI6IjQxZGRkMzA2LTc3MTYtNDVkNy1hZTNmLTNlMmJmYzNjYzUwMCIsIm1lZXRpbmdJZCI6ImJiYjllYTlmLTNlYmYtNDFmYi05ZTQ2LTNhZDJkZTE1MTFjNSIsInBhcnRpY2lwYW50SWQiOiJhYWFmZjNhOC0xOGZhLTQyMWQtYjE2MC00NWJkNzQ2MDE1NTQiLCJwcmVzZXRJZCI6ImJmYWZlZGFmLTMwMzMtNDk5Ny04NTExLTQ2ZWM4OTVlOWQ0ZCIsImlhdCI6MTc4ODU0MjcxMiwiZXhwIjoxNzk3MTgyNzEyfQ.J97R9CjafqfcpLDs5CKvcRKwHmHWRrVDby8baS5FVDFnguobfV9b9ZxPcX6Jo_58K2MWBQ1H_o0yr7HDI2cmeTfl9Cb9jTCWBZ1HBv2CVdHYHztuS_6GHp88OFkAKrmF9SF0nkVwIlXJig1BZRAOVaCPiLvRm6kKbrY4DlqvyA_hUDHJIU-Kflcxk2lLtI18_7wq2BXcFY0N4NxuU571U-Fv22lAqF-Rdg4MyBD_9xMRDd9q1szK2NxNKygLvXhB43HXCS47wutFBD9yJiNvLadsEbQI4E6KVxY2icFVr21hUKuNEw67K1mB6txNaojmdSBBCwomGBoYzi79EVdOtQ'
+const AUTH_TOKEN = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcmdJZCI6IjZkNmZiZTkxLTkwNGItNDU5OS1hZmE5LTA2NjBhYmRjYzg4MCIsIm1lZXRpbmdJZCI6ImJiYjYxOGU4LWM5ZjktNDI0My05NGI0LTdmNmI1NTg4OTg5MiIsInBhcnRpY2lwYW50SWQiOiJhYWFhOTBkNC0xOTdkLTQ3YTUtYTM5ZC01OTExYTE5NTI3ZGMiLCJwcmVzZXRJZCI6ImVlYjM4MjhmLTMwYmEtNGE0Ni04ZWNhLTI0YTM2N2QzYzA2MiIsImlhdCI6MTc4ODYxODI0OCwiZXhwIjoxNzk3MjU4MjQ4fQ.f3r3wkBvO7RQlki2TjHM5Jda8JNkl4SENy1vEyQtgVgoYPp3CYrhDyBVjNhwodTgnxAB5MP5eqNtwIbm7Z1xMRjCvDH5C3cSdyz4MJNTfGuGOqPJGnZmA-GZ9ypv-n3UQPvbynXzXCcZaHrGW4MqowEt3WVF1MCZuDpZCV5b7S6BWSTmQiIL7Xgb6jeVZa05QpEtddTA_yIQxFQqYFPDowmSjhLHQDXdx2-M_3C2c1zMVxZ6b_Xadrq_sSqU54zANnM0QIjL0NYSiKOaAz0vQR4k4VYfCYy2TA71Gr-7TAAQqSBu1PryQohfL6enXObEFvrqm9kr5Rtmum9xVHVDZg';
+
+// Allow a second participant via ?authToken=... (same meetingId, different participantId)
+const authTokenFromQuery =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('authToken')
+    : null;
+
+const RESOLVED_AUTH_TOKEN =
+  authTokenFromQuery || AUTH_TOKEN;
 // ============================================================
 // WHITEBOARD PLUGIN HOST
 // ============================================================
@@ -217,7 +226,7 @@ export default function App() {
 
           await initMeeting({
             authToken:
-              AUTH_TOKEN,
+              RESOLVED_AUTH_TOKEN,
 
             defaults: {
               audio: true,

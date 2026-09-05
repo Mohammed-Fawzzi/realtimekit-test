@@ -56,6 +56,27 @@ export function normalizeScene(scene) {
   };
 }
 
+/**
+ * RealtimeKit store.subscribe(key, cb) passes `{ [key]: value }`.
+ * Docs example: store.subscribe('value', ({ value }) => ...).
+ * So for key 'scene' the payload is `{ scene }`, not `{ value }` or the scene itself.
+ */
+export function extractStoreScene(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if (payload.scene !== undefined) {
+    return normalizeScene(payload.scene);
+  }
+
+  if (payload.value !== undefined) {
+    return normalizeScene(payload.value);
+  }
+
+  return normalizeScene(payload);
+}
+
 export function sceneElementCount(scene) {
   return (scene?.elements || []).filter(
     (el) => el && !el.isDeleted,
