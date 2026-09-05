@@ -141,33 +141,13 @@ function MeetingUI({
   }
 
   return (
-    <div
-      style={{
-        width: '100vw',
-
-        height: '100vh',
-
-        position: 'fixed',
-
-        inset: 0,
-
-        overflow: 'hidden',
-      }}
-    >
+    <div className="rtk-meeting-shell">
       <RtkMeeting
         meeting={meeting}
-
         config={config}
-
         mode="fill"
-
-        showSetupScreen={
-          true
-        }
-
-        applyDesignSystem={
-          true
-        }
+        showSetupScreen={true}
+        applyDesignSystem={true}
       />
     </div>
   );
@@ -721,30 +701,42 @@ export default function App() {
               meeting,
             );
 
-          console.log(
-            '======================================',
-          );
+          // Keep Leave / More easy to reach on mobile (end of bar).
+          const mobileBar = [
+            'rtk-mic-toggle',
+            'rtk-camera-toggle',
+            'rtk-webinar-stage-toggle',
+            'rtk-stage-toggle',
+            'rtk-more-toggle',
+            'rtk-leave-button',
+          ];
 
-          console.log(
-            '✅ ALL ADDONS REGISTERED',
-          );
-
-          console.log(
-            'NEW UI CONFIG:',
-            newConfig,
-          );
-
-          console.log(
-            '======================================',
-          );
-
-          // ======================================================
-          // UPDATE UI
-          // ======================================================
-
-          setConfig(
-            newConfig,
-          );
+          setConfig({
+            ...newConfig,
+            root: {
+              ...newConfig.root,
+              'div#controlbar-mobile': mobileBar,
+            },
+            styles: {
+              ...newConfig.styles,
+              'rtk-controlbar.sm': {
+                ...(newConfig.styles?.['rtk-controlbar.sm'] || {}),
+                display: 'flex',
+                position: 'relative',
+                zIndex: '50',
+                backgroundColor:
+                  'rgb(var(--rtk-colors-background-1000, 0 0 0))',
+              },
+              'rtk-controlbar.md': {
+                ...(newConfig.styles?.['rtk-controlbar.md'] || {}),
+                display: 'flex',
+                position: 'relative',
+                zIndex: '50',
+                backgroundColor:
+                  'rgb(var(--rtk-colors-background-1000, 0 0 0))',
+              },
+            },
+          });
         } catch (error) {
           console.error(
             '❌ ADDONS INITIALIZATION ERROR:',
