@@ -113,59 +113,20 @@ function MeetingUI({
 }) {
   if (!meeting) {
     return (
-      <div
-        style={{
-          width: '100vw',
-
-          height: '100vh',
-
-          display: 'flex',
-
-          alignItems: 'center',
-
-          justifyContent: 'center',
-
-          background: '#111',
-
-          color: '#fff',
-
-          fontFamily:
-            'Arial, sans-serif',
-        }}
-      >
+      <div className="rtk-meeting-shell rtk-meeting-shell--loading">
         Loading meeting...
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        width: '100vw',
-
-        height: '100vh',
-
-        position: 'fixed',
-
-        inset: 0,
-
-        overflow: 'hidden',
-      }}
-    >
+    <div className="rtk-meeting-shell">
       <RtkMeeting
         meeting={meeting}
-
         config={config}
-
         mode="fill"
-
-        showSetupScreen={
-          true
-        }
-
-        applyDesignSystem={
-          true
-        }
+        showSetupScreen={true}
+        applyDesignSystem={true}
       />
     </div>
   );
@@ -688,30 +649,31 @@ export default function App() {
               meeting,
             );
 
-          console.log(
-            '======================================',
-          );
+          // On phones, Fullscreen often traps users with no exit control.
+          const stripFullscreen = (items) => {
+            if (!Array.isArray(items)) return items;
+            return items.filter((item) => {
+              const name = Array.isArray(item) ? item[0] : item;
+              return name !== 'rtk-fullscreen-toggle';
+            });
+          };
 
-          console.log(
-            '✅ ALL ADDONS REGISTERED',
-          );
-
-          console.log(
-            'NEW UI CONFIG:',
-            newConfig,
-          );
-
-          console.log(
-            '======================================',
-          );
-
-          // ======================================================
-          // UPDATE UI
-          // ======================================================
-
-          setConfig(
-            newConfig,
-          );
+          setConfig({
+            ...newConfig,
+            root: {
+              ...newConfig.root,
+              'rtk-more-toggle.activeMoreMenu.sm': stripFullscreen(
+                newConfig.root?.[
+                  'rtk-more-toggle.activeMoreMenu.sm'
+                ],
+              ),
+              'rtk-more-toggle.activeMoreMenu.md': stripFullscreen(
+                newConfig.root?.[
+                  'rtk-more-toggle.activeMoreMenu.md'
+                ],
+              ),
+            },
+          });
         } catch (error) {
           console.error(
             '❌ ADDONS INITIALIZATION ERROR:',

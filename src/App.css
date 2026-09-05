@@ -9,4 +9,41 @@ body,
 
 body {
   overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+}
+
+#root {
+  overflow: hidden;
+}
+
+/* Outer shell only — do NOT override rtk-* internals (breaks UI Kit layout). */
+.rtk-meeting-shell {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  max-height: 100svh;
+  overflow: hidden;
+  box-sizing: border-box;
+  /* Keep UI above home indicator / notch without reflowing RTK grid */
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  background: #000;
+}
+
+.rtk-meeting-shell--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  background: #111;
+}
+
+.rtk-meeting-shell > rtk-meeting,
+.rtk-meeting-shell > * {
+  width: 100%;
+  height: 100%;
 }
